@@ -4,16 +4,24 @@ import numpy as np
 import mediapipe as mp
 import time
 import threading
-import av
-from collections import deque, Counter
+from collections import Counter
 from gtts import gTTS
 from io import BytesIO
-import streamlit.components.v1 as components
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, WebRtcMode
+from PIL import Image
 
 mp_hands   = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 mp_styles  = mp.solutions.drawing_styles
+
+
+@st.cache_resource
+def load_model():
+    return mp_hands.Hands(
+        static_image_mode=True,
+        max_num_hands=1,
+        model_complexity=0,
+        min_detection_confidence=0.5,
+    )
 
 
 # ──────────────────────────────────────────────────────────────
@@ -34,120 +42,38 @@ def clasificar(results) -> tuple[str, str]:
 
     f = [index_up, middle_up, ring_up, pinky_up]
 
-    if f == [True, True, True, True] and thumb_out:   return "Hola",      "Mano abierta"
+    if f == [True, True, True, True] and thumb_out:   return "👋 Hola",      "Mano abierta"
     if f == [False,False,False,False] and thumb_up \
-       and not thumb_out:                              return "Bien",      "Pulgar arriba"
+       and not thumb_out:                              return "👍 Bien",      "Pulgar arriba"
     if f == [False,False,False,False] and not thumb_up \
-       and not thumb_out:                              return "Pare",      "Puño cerrado"
-    if f == [True, False,False,True]  and thumb_out:  return "Te amo",    "Seña ILY"
-    if f == [True, True, False,False] and not thumb_out: return "Paz",    "Dedos en V"
-    if f == [True, False,False,False] and not thumb_out: return "Uno",    "Índice arriba"
-    if f == [True, True, False,False] and thumb_out:  return "Dos",       "Dos dedos"
-    if f == [True, True, True, False] and not thumb_out: return "Tres",   "Tres dedos"
-    if f == [True, True, True, True]  and not thumb_out: return "Cuatro", "Cuatro dedos"
-    if f == [False,False,False,True]  and thumb_out:  return "Llámame",   "Seña teléfono"
+       and not thumb_out:                              return "✊ Pare",      "Puño cerrado"
+    if f == [True, False,False,True]  and thumb_out:  return "🤟 Te amo",    "Seña ILY"
+    if f == [True, True, False,False] and not thumb_out: return "✌️ Paz",    "Dedos en V"
+    if f == [True, False,False,False] and not thumb_out: return "☝️ Uno",    "Índice arriba"
+    if f == [True, True, False,False] and thumb_out:  return "✌️ Dos",       "Dos dedos"
+    if f == [True, True, True, False] and not thumb_out: return "3️⃣ Tres",   "Tres dedos"
+    if f == [True, True, True, True]  and not thumb_out: return "4️⃣ Cuatro", "Cuatro dedos"
+    if f == [False,False,False,True]  and thumb_out:  return "🤙 Llámame",   "Seña teléfono"
 
     return "", ""
 
 
 # ──────────────────────────────────────────────────────────────
-#  AUDIO — gTTS en hilo separado para no bloquear el loop
+#  AUDIO — gTTS
 # ──────────────────────────────────────────────────────────────
 _audio_cache: dict[str, bytes] = {}
-_audio_lock = threading.Lock()
 
-def _generar_en_hilo(texto: str):
+def get_audio(texto: str) -> bytes | None:
+    if texto in _audio_cache:
+        return _audio_cache[texto]
     try:
         tts = gTTS(text=texto, lang="es", slow=False)
         fp = BytesIO()
         tts.write_to_fp(fp)
-        with _audio_lock:
-            _audio_cache[texto] = fp.getvalue()
+        _audio_cache[texto] = fp.getvalue()
+        return _audio_cache[texto]
     except Exception:
-        pass
-
-def pedir_audio(texto: str) -> bytes | None:
-    """Retorna bytes si ya está cacheado, si no dispara hilo en background."""
-    with _audio_lock:
-        if texto in _audio_cache:
-            return _audio_cache[texto]
-    # Generar en background (no bloquea)
-    t = threading.Thread(target=_generar_en_hilo, args=(texto,), daemon=True)
-    t.start()
-    return None
-
-
-# ──────────────────────────────────────────────────────────────
-#  VIDEO PROCESSOR — procesa cada frame con MediaPipe (WebRTC)
-# ──────────────────────────────────────────────────────────────
-class SignProcessor(VideoProcessorBase):
-    def __init__(self):
-        self.hands = mp_hands.Hands(
-            static_image_mode=False,
-            max_num_hands=1,
-            model_complexity=0,
-            min_detection_confidence=0.6,
-            min_tracking_confidence=0.5,
-        )
-        self.frame_count = 0
-        self.last_result = None
-        self.sign_buffer = deque(maxlen=5)
-        self._lock = threading.Lock()
-        self.stable_label = ""
-        self.stable_desc = ""
-        self.paused = False
-
-    def recv(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        img = cv2.flip(img, 1)
-
-        if self.paused:
-            # Dibujar texto de "PAUSADO" sobre el video
-            cv2.putText(img, "PAUSADO", (img.shape[1]//2 - 100, img.shape[0]//2),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.5, (245, 158, 11), 3)
-            return av.VideoFrame.from_ndarray(img, format="bgr24")
-
-        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        self.frame_count += 1
-
-        if self.frame_count % 2 == 0:
-            rgb.flags.writeable = False
-            self.last_result = self.hands.process(rgb)
-            rgb.flags.writeable = True
-
-        if self.last_result and self.last_result.multi_hand_landmarks:
-            for hand in self.last_result.multi_hand_landmarks:
-                mp_drawing.draw_landmarks(
-                    img, hand, mp_hands.HAND_CONNECTIONS,
-                    mp_styles.get_default_hand_landmarks_style(),
-                    mp_styles.get_default_hand_connections_style(),
-                )
-
-            label, desc = clasificar(self.last_result)
-            if label:
-                self.sign_buffer.append((label, desc))
-            else:
-                self.sign_buffer.append(("", ""))
-
-            if len(self.sign_buffer) == 5:
-                labels = [x[0] for x in self.sign_buffer if x[0]]
-                if labels:
-                    counter = Counter(labels)
-                    top, count = counter.most_common(1)[0]
-                    if count >= 3:
-                        with self._lock:
-                            self.stable_label = top
-                            self.stable_desc = next(
-                                x[1] for x in self.sign_buffer if x[0] == top
-                            )
-        else:
-            self.sign_buffer.append(("", ""))
-
-        return av.VideoFrame.from_ndarray(img, format="bgr24")
-
-    def get_result(self):
-        with self._lock:
-            return self.stable_label, self.stable_desc
+        return None
 
 
 # ──────────────────────────────────────────────────────────────
@@ -204,9 +130,7 @@ def main():
 
     with col_ctrl:
         st.subheader("⚙️ Controles")
-        pausar_on = st.toggle("Pausar Traducción", value=False,
-                              help="Congela la IA temporalmente para que no detecte señas por accidente.")
-        audio_on  = st.toggle("Voz Automática", value=True)
+        audio_on = st.toggle("🔊 Voz Automática", value=True)
         st.divider()
 
         st.subheader("🟢 Estado")
@@ -258,92 +182,74 @@ def main():
 """)
         st.caption("Powered by MediaPipe · Platanus '26")
 
-    # ── Cámara WebRTC (funciona en LOCAL y en la NUBE) ──
-    RTC_CONFIG = {
-        "iceServers": [
-            {"urls": ["stun:stun.l.google.com:19302"]},
-            {"urls": ["stun:stun1.l.google.com:19302"]},
-            {
-                "urls": "turn:openrelay.metered.ca:80",
-                "username": "openrelayproject",
-                "credential": "openrelayproject",
-            },
-            {
-                "urls": "turn:openrelay.metered.ca:443",
-                "username": "openrelayproject",
-                "credential": "openrelayproject",
-            },
-            {
-                "urls": "turn:openrelay.metered.ca:443?transport=tcp",
-                "username": "openrelayproject",
-                "credential": "openrelayproject",
-            },
-        ]
-    }
-
+    # ── Cámara nativa de Streamlit (funciona en CUALQUIER plataforma) ──
     with col_cam:
-        ctx = webrtc_streamer(
-            key="signa",
-            mode=WebRtcMode.SENDRECV,
-            video_processor_factory=SignProcessor,
-            media_stream_constraints={"video": True, "audio": False},
-            rtc_configuration=RTC_CONFIG,
-            async_processing=True,
-        )
+        st.markdown("##### 📸 Muestra tu seña y presiona el botón de captura")
+        photo = st.camera_input("Captura tu seña", key="camera", label_visibility="collapsed")
 
-    # ── Loop de lectura de resultados ──
-    if ctx.state.playing:
-        status_ph.markdown('<span class="badge-on">🟢 IA Activa</span>', unsafe_allow_html=True)
-        transl_ph.markdown(
-            '<div class="sena-card" style="color:#475569;font-size:1.1rem">'
-            'Muestra tu mano 🖐</div>',
-            unsafe_allow_html=True,
-        )
+        if photo is not None:
+            # Cargar la imagen capturada
+            img = Image.open(photo)
+            img_array = np.array(img)
 
-        last_text = ""
-        while ctx.state.playing:
-            try:
-                if ctx.video_processor:
-                    # Pasar estado de pausa al procesador
-                    ctx.video_processor.paused = pausar_on
+            # Procesar con MediaPipe
+            hands_model = load_model()
+            rgb = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+            rgb2 = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
+            results = hands_model.process(rgb2)
 
-                    if pausar_on:
-                        transl_ph.markdown(
-                            '<div class="sena-card" style="color:#64748b;font-size:1.1rem; border-left:5px solid #64748b;">'
-                            '⏸ Traducción pausada</div>', unsafe_allow_html=True)
-                        time.sleep(0.3)
-                        continue
+            if results.multi_hand_landmarks:
+                # Dibujar landmarks sobre la imagen
+                annotated = img_array.copy()
+                for hand in results.multi_hand_landmarks:
+                    mp_drawing.draw_landmarks(
+                        annotated, hand, mp_hands.HAND_CONNECTIONS,
+                        mp_styles.get_default_hand_landmarks_style(),
+                        mp_styles.get_default_hand_connections_style(),
+                    )
+                st.image(annotated, caption="🔍 Mano detectada", use_container_width=True)
 
-                    label, desc = ctx.video_processor.get_result()
+                label, desc = clasificar(results)
+                if label:
+                    status_ph.markdown('<span class="badge-on">🟢 Seña Detectada</span>', unsafe_allow_html=True)
+                    transl_ph.markdown(
+                        f'<div class="sena-card">{label}'
+                        f'<div class="sena-sub">{desc}</div></div>',
+                        unsafe_allow_html=True,
+                    )
 
-                    if label and label != last_text:
-                        transl_ph.markdown(
-                            f'<div class="sena-card">{label}'
-                            f'<div class="sena-sub">{desc}</div></div>',
-                            unsafe_allow_html=True,
-                        )
+                    # Audio
+                    if audio_on:
+                        # Extraer solo el texto sin emoji para TTS
+                        clean_label = label.split(" ", 1)[-1] if " " in label else label
+                        audio_bytes = get_audio(clean_label)
+                        if audio_bytes:
+                            audio_ph.audio(audio_bytes, format="audio/mp3", autoplay=True)
 
-                        if audio_on:
-                            audio_bytes = pedir_audio(label)
-                            if audio_bytes:
-                                unique_bytes = audio_bytes + str(time.time()).encode()
-                                audio_ph.empty()
-                                audio_ph.audio(unique_bytes, format="audio/mp3", autoplay=True)
-
-                        st.session_state.historial.append(label)
-                        update_historial()
-                        last_text = label
-
-                time.sleep(0.2)
-            except Exception:
-                break
-    else:
-        status_ph.markdown('<span class="badge-off">🔴 Inactivo</span>', unsafe_allow_html=True)
-        transl_ph.markdown(
-            '<div class="sena-card" style="color:#475569;font-size:1.1rem">'
-            'Presiona START para activar la cámara.</div>',
-            unsafe_allow_html=True,
-        )
+                    # Agregar al historial
+                    st.session_state.historial.append(label)
+                    update_historial()
+                else:
+                    status_ph.markdown('<span class="badge-on">🟡 Mano visible</span>', unsafe_allow_html=True)
+                    transl_ph.markdown(
+                        '<div class="sena-card" style="color:#475569;font-size:1.1rem">'
+                        'Seña no reconocida. Intenta otra posición.</div>',
+                        unsafe_allow_html=True,
+                    )
+            else:
+                status_ph.markdown('<span class="badge-off">🔴 Sin mano</span>', unsafe_allow_html=True)
+                transl_ph.markdown(
+                    '<div class="sena-card" style="color:#475569;font-size:1.1rem">'
+                    'No se detectó mano. Asegúrate de mostrar tu mano claramente.</div>',
+                    unsafe_allow_html=True,
+                )
+        else:
+            status_ph.markdown('<span class="badge-off">🔴 Esperando captura</span>', unsafe_allow_html=True)
+            transl_ph.markdown(
+                '<div class="sena-card" style="color:#475569;font-size:1.1rem">'
+                'Presiona el botón 📸 para capturar tu seña.</div>',
+                unsafe_allow_html=True,
+            )
 
 
 if __name__ == "__main__":
