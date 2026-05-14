@@ -1,3 +1,12 @@
+---
+title: Signa Interpreter
+emoji: 🤟
+colorFrom: yellow
+colorTo: blue
+sdk: docker
+app_port: 8501
+---
+
 # 🤟 Signa Interpreter
 
 **Platanus Build Night 26 · Caracas, Venezuela 🇻🇪**
