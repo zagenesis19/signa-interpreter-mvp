@@ -1,0 +1,6 @@
+[theme]
+primaryColor = "#F59E0B" # El naranja/ámbar para botones
+backgroundColor = "#0F172A" # El azul marino oscuro para el fondo
+secondaryBackgroundColor = "#1E293B" # Un azul un poco más claro para los paneles
+textColor = "#FFFFFF" # Texto blanco
+font = "sans serif"

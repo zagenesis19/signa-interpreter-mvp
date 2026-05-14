@@ -1,0 +1,10 @@
+hand_landmarker.task
+holistic_landmarker.task
+*.task
+venv/
+__pycache__/
+*.pyc
+.env
+temp_mp/
+mediapipe_files.txt
+venv310/

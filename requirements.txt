@@ -1,0 +1,7 @@
+streamlit==1.38.0
+opencv-python==4.10.0.84
+mediapipe==0.10.11
+numpy==1.26.4
+gTTS==2.5.3
+python-dotenv==1.0.1
+anthropic==0.34.2
