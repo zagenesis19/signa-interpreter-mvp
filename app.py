@@ -259,18 +259,35 @@ def main():
         st.caption("Powered by MediaPipe · Platanus '26")
 
     # ── Cámara WebRTC (funciona en LOCAL y en la NUBE) ──
+    RTC_CONFIG = {
+        "iceServers": [
+            {"urls": ["stun:stun.l.google.com:19302"]},
+            {"urls": ["stun:stun1.l.google.com:19302"]},
+            {
+                "urls": "turn:openrelay.metered.ca:80",
+                "username": "openrelayproject",
+                "credential": "openrelayproject",
+            },
+            {
+                "urls": "turn:openrelay.metered.ca:443",
+                "username": "openrelayproject",
+                "credential": "openrelayproject",
+            },
+            {
+                "urls": "turn:openrelay.metered.ca:443?transport=tcp",
+                "username": "openrelayproject",
+                "credential": "openrelayproject",
+            },
+        ]
+    }
+
     with col_cam:
         ctx = webrtc_streamer(
             key="signa",
             mode=WebRtcMode.SENDRECV,
             video_processor_factory=SignProcessor,
             media_stream_constraints={"video": True, "audio": False},
-            rtc_configuration={
-                "iceServers": [
-                    {"urls": ["stun:stun.l.google.com:19302"]},
-                    {"urls": ["stun:stun1.l.google.com:19302"]},
-                ]
-            },
+            rtc_configuration=RTC_CONFIG,
             async_processing=True,
         )
 
