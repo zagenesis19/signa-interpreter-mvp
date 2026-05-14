@@ -1,7 +1,5 @@
 import streamlit as st
-import cv2
 import numpy as np
-import mediapipe as mp
 import time
 import threading
 import json
@@ -11,9 +9,18 @@ from gtts import gTTS
 from io import BytesIO
 import streamlit.components.v1 as components
 
-mp_hands   = mp.solutions.hands
-mp_drawing = mp.solutions.drawing_utils
-mp_styles  = mp.solutions.drawing_styles
+# --- Modo Cloud: si no hay hardware (cámara/mediapipe), mostramos solo la UI ---
+CLOUD_MODE = False
+try:
+    import cv2
+    import mediapipe as mp
+    mp_hands   = mp.solutions.hands
+    mp_drawing = mp.solutions.drawing_utils
+    mp_styles  = mp.solutions.drawing_styles
+except (ImportError, AttributeError):
+    CLOUD_MODE = True
+    cv2 = None
+    mp = None
 
 
 @st.cache_resource
@@ -253,17 +260,28 @@ def main():
     with col_cam:
         video_ph = st.empty()
 
-    if not camera_on:
+    if not camera_on or CLOUD_MODE:
         video_ph.image(
             "https://images.unsplash.com/photo-1557804506-669a67965ba0?w=900",
             use_container_width=True,
         )
-        status_ph.markdown('<span class="badge-off">🔴 Inactivo</span>', unsafe_allow_html=True)
-        transl_ph.markdown(
-            '<div class="sena-card" style="color:#475569;font-size:1.1rem">'
-            'Activa la cámara para comenzar.</div>',
-            unsafe_allow_html=True,
-        )
+        if CLOUD_MODE:
+            status_ph.markdown('<span class="badge-on">☁️ Modo Cloud</span>', unsafe_allow_html=True)
+            transl_ph.markdown(
+                '<div class="sena-card" style="color:#60A5FA;font-size:1.1rem">'
+                '🚀 Interfaz desplegada correctamente.<br>'
+                '<span style="font-size:0.85rem;color:#94A3B8;">'
+                'La IA de visión por computador requiere hardware local (cámara + GPU).<br>'
+                'Para la demo en vivo, ejecuta <code>streamlit run app.py</code> en tu equipo.</span></div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            status_ph.markdown('<span class="badge-off">🔴 Inactivo</span>', unsafe_allow_html=True)
+            transl_ph.markdown(
+                '<div class="sena-card" style="color:#475569;font-size:1.1rem">'
+                'Activa la cámara para comenzar.</div>',
+                unsafe_allow_html=True,
+            )
         return
 
     hands_model = load_model()
